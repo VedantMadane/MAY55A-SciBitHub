@@ -65,6 +65,7 @@ export function DiscussionDropdownMenu({ discussion, showVisit = true }: { discu
                         <DropdownMenuItem
                             title="Edit"
                             className="px-4"
+                            onSelect={() => setOpenEdit(true)}
                             onClick={() => setOpenEdit(true)}
                         >
                             Edit

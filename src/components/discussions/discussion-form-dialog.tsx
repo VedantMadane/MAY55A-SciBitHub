@@ -50,7 +50,15 @@ export default function DiscussionFormDialog({
     const router = useRouter();
     const form = useForm({
         resolver: zodResolver(discussionInputDataSchema),
-        defaultValues: { title: "", body: "", category: "", ...data },
+        defaultValues: {
+            title: data?.title || "",
+            body: data?.body || "",
+            category: data?.category || "",
+            tags: data?.tags || [],
+            files: data?.files || [],
+            creator: data?.creator || "",
+            id: data?.id,
+        },
     });
     const [newFiles, setNewFiles] = useState<FileWithPreview[]>([]);
     const [initialFiles, setInitialFiles] = useState<FileFromPath[]>([]);
@@ -132,38 +140,42 @@ export default function DiscussionFormDialog({
     }
 
     useEffect(() => {
-        if (data) {
+        if (open && data) {
             form.reset({
                 title: data.title || "",
                 body: data.body || "",
                 category: data.category || "",
                 tags: data.tags || [],
-                ...data,
+                files: data.files || [],
+                creator: data.creator || "",
+                id: data.id,
             });
-        }
-        if (data?.files?.length) {
-            (async () => {
-                const files = await Promise.all(
-                    data.files!.map(async (path) => {
-                        const file = await getFileWithMetadata(path);
-                        if (!file) {
-                            return {
-                                name: path.split("/").pop() || "Unknown",
-                                preview: "",
-                                type: "Unknown",
-                                size: 0,
-                                path,
+            if (data.files?.length) {
+                (async () => {
+                    const files = await Promise.all(
+                        data.files!.map(async (path) => {
+                            const file = await getFileWithMetadata(path);
+                            if (!file) {
+                                return {
+                                    name: path.split("/").pop() || "Unknown",
+                                    preview: "",
+                                    type: "Unknown",
+                                    size: 0,
+                                    path,
+                                }
                             }
-                        }
-                        return file;
-                    }
-                    )
-                );
-                setInitialFiles(files);
-                setExistingFiles(files);
-            })();
+                            return file;
+                        })
+                    );
+                    setInitialFiles(files);
+                    setExistingFiles(files);
+                })();
+            } else {
+                setInitialFiles([]);
+                setExistingFiles([]);
+            }
         }
-    }, [data, form, open]);
+    }, [open, data?.id]);
 
     if (loading) {
         return null;
@@ -188,7 +200,19 @@ export default function DiscussionFormDialog({
                     </DialogDescription>
                 </DialogHeader>
                 <Form {...form}>
-                    <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4 p-4 max-h-[80vh] overflow-y-auto ">
+                    <form
+                        onSubmit={form.handleSubmit(handleSubmit, (errors) => {
+                            console.error("Discussion form validation errors:", errors);
+                            const firstError = Object.values(errors)[0];
+                            if (firstError?.message) {
+                                toast({
+                                    description: String(firstError.message),
+                                    variant: "destructive",
+                                });
+                            }
+                        })}
+                        className="space-y-4 p-4 max-h-[80vh] overflow-y-auto "
+                    >
                         <FormField
                             control={form.control}
                             name="title"

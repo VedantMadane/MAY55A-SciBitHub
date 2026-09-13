@@ -9,8 +9,8 @@ export const discussionInputDataSchema = z.object({
         errorMap: () => ({ message: "Please select a category" }),
     }),
     tags: z.array(z.string()).nullable().optional(),
-    files: z.array(z.string()).optional(),
-    creator: z.string().optional(),
+    files: z.array(z.string()).nullable().optional(),
+    creator: z.string().nullable().optional(),
 });
 
 export type DiscussionInputData = z.infer<typeof discussionInputDataSchema>;
