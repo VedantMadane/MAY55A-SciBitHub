@@ -192,7 +192,9 @@ export default function DiscussionFormDialog({
                     }
                 </DialogTrigger>
             )}
-            <DialogContent className="lg:min-w-[700px] md:min-w-[700px] sm:max-w-[425px] max-h-[90vh]">
+            <DialogContent
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onInteractOutside={(e) => e.preventDefault()} className="lg:min-w-[700px] md:min-w-[700px] sm:max-w-[425px] max-h-[90vh]">
                 <DialogHeader>
                     <DialogTitle>{data ? "Edit Discussion" : "Create A New Discussion"}</DialogTitle>
                     <DialogDescription>
@@ -201,6 +203,7 @@ export default function DiscussionFormDialog({
                 </DialogHeader>
                 <Form {...form}>
                     <form
+                        id="discussion-form"
                         onSubmit={form.handleSubmit(handleSubmit, (errors) => {
                             console.error("Discussion form validation errors:", errors);
                             const firstError = Object.values(errors)[0];
@@ -288,7 +291,7 @@ export default function DiscussionFormDialog({
                             <Button type="reset" disabled={submitting} onClick={resetForm} variant="outline" className="mr-2">
                                 reset
                             </Button>
-                            <Button type="submit" disabled={submitting}>
+                            <Button type="submit" form="discussion-form" disabled={submitting}>
                                 {submitting ? "submitting..." : data ? "Save changes" : "Post"}
                             </Button>
                         </DialogFooter>

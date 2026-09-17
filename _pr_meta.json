@@ -1,0 +1,10 @@
+{
+  "repo": "MAY55A/SciBitHub",
+  "number": 23,
+  "base": "dev",
+  "head": "fix/issue-22",
+  "fork": "VedantMadane/MAY55A-SciBitHub",
+  "title": "fix: Fix discussion edit form Save not submitting",
+  "url": "https://github.com/MAY55A/SciBitHub/pull/23",
+  "rebased": true
+}
