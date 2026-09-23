@@ -22,16 +22,43 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/src/contexts/AuthContext";
 
 
-export default function DiscussionFormDialog({ data }: { data?: DiscussionInputData }) {
+interface DiscussionFormDialogProps {
+    data?: DiscussionInputData;
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+}
+
+export default function DiscussionFormDialog({
+    data,
+    open: controlledOpen,
+    onOpenChange,
+}: DiscussionFormDialogProps) {
     const { user, loading } = useAuth();
-    const [open, setOpen] = useState(false);
+    const [internalOpen, setInternalOpen] = useState(false);
+    const isControlled = controlledOpen !== undefined;
+    const open = isControlled ? controlledOpen : internalOpen;
+    const setOpen = (next: boolean) => {
+        if (isControlled) {
+            onOpenChange?.(next);
+        } else {
+            setInternalOpen(next);
+        }
+    };
     const [submitting, setSubmitting] = useState(false);
     const [message, setMessage] = useState<Message | undefined>(undefined);
     const { toast } = useToast();
     const router = useRouter();
     const form = useForm({
         resolver: zodResolver(discussionInputDataSchema),
-        defaultValues: { title: "", body: "", category: "", ...data },
+        defaultValues: {
+            title: data?.title || "",
+            body: data?.body || "",
+            category: data?.category || "",
+            tags: data?.tags || [],
+            files: data?.files || [],
+            creator: data?.creator || "",
+            id: data?.id,
+        },
     });
     const [newFiles, setNewFiles] = useState<FileWithPreview[]>([]);
     const [initialFiles, setInitialFiles] = useState<FileFromPath[]>([]);
@@ -78,7 +105,8 @@ export default function DiscussionFormDialog({ data }: { data?: DiscussionInputD
             return;
         }
         setSubmitting(true);
-        const res = await updateDiscussion(formData, newFiles, existingFiles.map(f => f.path));
+        // Merge so id/creator from the original discussion are always present
+        const res = await updateDiscussion({ ...data, ...formData }, newFiles, existingFiles.map(f => f.path));
         setSubmitting(false);
 
         toast({
@@ -96,7 +124,6 @@ export default function DiscussionFormDialog({ data }: { data?: DiscussionInputD
     }
 
     const handleSubmit = async (formData: DiscussionInputData) => {
-
         if (data) {
             await handleEdit(formData);
         } else {
@@ -105,7 +132,15 @@ export default function DiscussionFormDialog({ data }: { data?: DiscussionInputD
     }
 
     const resetForm = async () => {
-        form.reset();
+        form.reset({
+            title: data?.title || "",
+            body: data?.body || "",
+            category: data?.category || "",
+            tags: data?.tags || [],
+            files: data?.files || [],
+            creator: data?.creator || "",
+            id: data?.id,
+        });
         form.clearErrors();
         setMessage(undefined);
         setNewFiles([]);
@@ -113,6 +148,20 @@ export default function DiscussionFormDialog({ data }: { data?: DiscussionInputD
     }
 
     useEffect(() => {
+        if (!open) return;
+
+        if (data) {
+            form.reset({
+                title: data.title || "",
+                body: data.body || "",
+                category: data.category || "",
+                tags: data.tags || [],
+                files: data.files || [],
+                creator: data.creator || "",
+                id: data.id,
+            });
+        }
+
         if (data?.files?.length) {
             (async () => {
                 const files = await Promise.all(
@@ -128,14 +177,18 @@ export default function DiscussionFormDialog({ data }: { data?: DiscussionInputD
                             }
                         }
                         return file;
-                    }
-                    )
+                    })
                 );
                 setInitialFiles(files);
                 setExistingFiles(files);
             })();
+        } else {
+            setInitialFiles([]);
+            setExistingFiles([]);
         }
-    }, [data]);
+        // Only re-seed when the dialog opens or the discussion identity changes
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, data?.id]);
 
     if (loading) {
         return null;
@@ -143,13 +196,15 @@ export default function DiscussionFormDialog({ data }: { data?: DiscussionInputD
 
     return (
         //fix overflow issue when dialog is closed
-        <Dialog open={!!user && open} onOpenChange={(open) => { setOpen(open); if (!open) document.body.style.overflow = ""; }}>
-            <DialogTrigger asChild>
-                {data ?
-                    <Button variant="ghost" className="h-full font-normal p-0" onClick={() => setOpen(true)}>Edit</Button> :
-                    <Button className="font-bold" onClick={() => user ? setOpen(true) : router.push("/sign-in?redirect_to=/discussions")}>Open a Discussion</Button>
-                }
-            </DialogTrigger>
+        <Dialog open={!!user && open} onOpenChange={(next) => { setOpen(next); if (!next) document.body.style.overflow = ""; }}>
+            {!isControlled && (
+                <DialogTrigger asChild>
+                    {data ?
+                        <Button variant="ghost" className="h-full font-normal p-0" onClick={() => setOpen(true)}>Edit</Button> :
+                        <Button className="font-bold" onClick={() => user ? setOpen(true) : router.push("/sign-in?redirect_to=/discussions")}>Open a Discussion</Button>
+                    }
+                </DialogTrigger>
+            )}
             <DialogContent className="lg:min-w-[700px] md:min-w-[700px] sm:max-w-[425px] max-h-[90vh]">
                 <DialogHeader>
                     <DialogTitle>{data ? "Edit Discussion" : "Create A New Discussion"}</DialogTitle>
@@ -158,7 +213,16 @@ export default function DiscussionFormDialog({ data }: { data?: DiscussionInputD
                     </DialogDescription>
                 </DialogHeader>
                 <Form {...form}>
-                    <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4 p-4 max-h-[80vh] overflow-y-auto ">
+                    <form
+                        onSubmit={form.handleSubmit(handleSubmit, (errors) => {
+                            const first = Object.values(errors)[0];
+                            const description = first && "message" in first && first.message
+                                ? String(first.message)
+                                : "Please fix the highlighted fields.";
+                            toast({ description, variant: "destructive" });
+                        })}
+                        className="space-y-4 p-4 max-h-[80vh] overflow-y-auto "
+                    >
                         <FormField
                             control={form.control}
                             name="title"
@@ -195,20 +259,18 @@ export default function DiscussionFormDialog({ data }: { data?: DiscussionInputD
                             render={({ field }) => (
                                 <FormItem>
                                     <FormLabel className="text-green">Category</FormLabel>
-                                    <FormControl>
-                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                            <FormControl>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Select a category" />
-                                                </SelectTrigger>
-                                            </FormControl>
-                                            <SelectContent>
-                                                {Object.values(DiscussionCategory).map((category) => (
-                                                    <SelectItem value={category} key={category}>{category}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </FormControl>
+                                    <Select onValueChange={field.onChange} value={field.value || undefined}>
+                                        <FormControl>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Select a category" />
+                                            </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent>
+                                            {Object.values(DiscussionCategory).map((category) => (
+                                                <SelectItem value={category} key={category}>{category}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
                                     <FormDescription>{DiscussionCategoriesDescriptions[field.value as DiscussionCategory]}</FormDescription>
                                     <FormFieldMessage></FormFieldMessage>
                                 </FormItem>
@@ -233,7 +295,7 @@ export default function DiscussionFormDialog({ data }: { data?: DiscussionInputD
                         </div>
                         {!!message && <FormMessage message={message} />}
                         <DialogFooter>
-                            <Button type="reset" disabled={submitting} onClick={resetForm} variant="outline" className="mr-2">
+                            <Button type="button" disabled={submitting} onClick={resetForm} variant="outline" className="mr-2">
                                 reset
                             </Button>
                             <Button type="submit" disabled={submitting}>
