@@ -21,42 +21,39 @@ import { Message, FormMessage } from "../custom/form-message";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/src/contexts/AuthContext";
 
-
 interface DiscussionFormDialogProps {
     data?: DiscussionInputData;
-    open?: boolean;
-    onOpenChange?: (open: boolean) => void;
+    /** Called when the dialog closes (edit flow mounts this component only while open). */
+    onClose?: () => void;
+}
+
+function clearBodyLockStyles() {
+    document.body.style.removeProperty("pointer-events");
+    document.body.style.overflow = "";
 }
 
 export default function DiscussionFormDialog({
     data,
-    open: controlledOpen,
-    onOpenChange,
+    onClose,
 }: DiscussionFormDialogProps) {
     const { user, loading } = useAuth();
-    const [internalOpen, setInternalOpen] = useState(false);
-    const isControlled = controlledOpen !== undefined;
-    const open = isControlled ? controlledOpen : internalOpen;
-    const setOpen = (next: boolean) => {
-        if (isControlled) {
-            onOpenChange?.(next);
-        } else {
-            setInternalOpen(next);
-        }
-    };
+    // Edit path mounts this component when opening (same as UserFormDialog): start open.
+    // Create path keeps an internal closed state and uses DialogTrigger.
+    const [open, setOpen] = useState(!!data);
     const [submitting, setSubmitting] = useState(false);
     const [message, setMessage] = useState<Message | undefined>(undefined);
     const { toast } = useToast();
     const router = useRouter();
-    const form = useForm({
+    const form = useForm<DiscussionInputData>({
         resolver: zodResolver(discussionInputDataSchema),
         defaultValues: {
             title: data?.title || "",
             body: data?.body || "",
             category: data?.category || "",
-            tags: data?.tags || [],
-            files: data?.files || [],
-            creator: data?.creator || "",
+            tags: data?.tags ?? [],
+            // Always a real array in the form — Zod rejects null; DB null is mapped here.
+            files: data?.files ?? [],
+            creator: data?.creator ?? "",
             id: data?.id,
         },
     });
@@ -86,9 +83,10 @@ export default function DiscussionFormDialog({
         })
 
         if (res.success) {
-            document.body.style.overflow = "";
+            clearBodyLockStyles();
             startTransition(() => {
                 setOpen(false);
+                onClose?.();
                 router.refresh();
             });
         }
@@ -105,8 +103,17 @@ export default function DiscussionFormDialog({
             return;
         }
         setSubmitting(true);
-        // Merge so id/creator from the original discussion are always present
-        const res = await updateDiscussion({ ...data, ...formData }, newFiles, existingFiles.map(f => f.path));
+        // Keep id/creator from the original discussion; form values override the rest.
+        const res = await updateDiscussion(
+            {
+                ...formData,
+                id: data?.id ?? formData.id,
+                creator: data?.creator ?? formData.creator,
+                files: data?.files ?? formData.files,
+            },
+            newFiles,
+            existingFiles.map(f => f.path),
+        );
         setSubmitting(false);
 
         toast({
@@ -116,9 +123,10 @@ export default function DiscussionFormDialog({
 
         if (res.success) {
             startTransition(() => {
-                document.body.style.overflow = "";
+                clearBodyLockStyles();
                 router.refresh();
                 setOpen(false);
+                onClose?.();
             });
         }
     }
@@ -131,14 +139,26 @@ export default function DiscussionFormDialog({
         }
     }
 
+    const onInvalid = (errors: Record<string, unknown>) => {
+        const first = Object.values(errors)[0] as { message?: string } | undefined;
+        const description = first?.message
+            ? String(first.message)
+            : "Please fix the highlighted fields.";
+        console.error("Discussion form validation failed:", errors);
+        toast({ description, variant: "destructive" });
+    };
+
+    // Programmatic submit avoids native submit being swallowed by leftover Radix layers.
+    const runSubmit = form.handleSubmit(handleSubmit, onInvalid);
+
     const resetForm = async () => {
         form.reset({
             title: data?.title || "",
             body: data?.body || "",
             category: data?.category || "",
-            tags: data?.tags || [],
-            files: data?.files || [],
-            creator: data?.creator || "",
+            tags: data?.tags ?? [],
+            files: data?.files ?? [],
+            creator: data?.creator ?? "",
             id: data?.id,
         });
         form.clearErrors();
@@ -147,22 +167,33 @@ export default function DiscussionFormDialog({
         setExistingFiles(initialFiles);
     }
 
+    // Restore body lock styles when the dialog closes (Radix dropdown/dialog race).
     useEffect(() => {
-        if (!open) return;
-
-        if (data) {
-            form.reset({
-                title: data.title || "",
-                body: data.body || "",
-                category: data.category || "",
-                tags: data.tags || [],
-                files: data.files || [],
-                creator: data.creator || "",
-                id: data.id,
-            });
+        if (!open) {
+            clearBodyLockStyles();
+            return;
         }
+        // Dialog may have captured pointer-events:none from a still-closing menu.
+        const t = window.setTimeout(() => {
+            document.body.style.removeProperty("pointer-events");
+        }, 0);
+        return () => window.clearTimeout(t);
+    }, [open]);
 
-        if (data?.files?.length) {
+    useEffect(() => {
+        if (!open || !data) return;
+
+        form.reset({
+            title: data.title || "",
+            body: data.body || "",
+            category: data.category || "",
+            tags: data.tags ?? [],
+            files: data.files ?? [],
+            creator: data.creator ?? "",
+            id: data.id,
+        });
+
+        if (data.files?.length) {
             (async () => {
                 const files = await Promise.all(
                     data.files!.map(async (path) => {
@@ -186,7 +217,6 @@ export default function DiscussionFormDialog({
             setInitialFiles([]);
             setExistingFiles([]);
         }
-        // Only re-seed when the dialog opens or the discussion identity changes
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, data?.id]);
 
@@ -194,15 +224,24 @@ export default function DiscussionFormDialog({
         return null;
     }
 
+    const handleOpenChange = (next: boolean) => {
+        setOpen(next);
+        if (!next) {
+            clearBodyLockStyles();
+            onClose?.();
+        }
+    };
+
     return (
-        //fix overflow issue when dialog is closed
-        <Dialog open={!!user && open} onOpenChange={(next) => { setOpen(next); if (!next) document.body.style.overflow = ""; }}>
-            {!isControlled && (
+        <Dialog open={!!user && open} onOpenChange={handleOpenChange}>
+            {!data && (
                 <DialogTrigger asChild>
-                    {data ?
-                        <Button variant="ghost" className="h-full font-normal p-0" onClick={() => setOpen(true)}>Edit</Button> :
-                        <Button className="font-bold" onClick={() => user ? setOpen(true) : router.push("/sign-in?redirect_to=/discussions")}>Open a Discussion</Button>
-                    }
+                    <Button
+                        className="font-bold"
+                        onClick={() => user ? setOpen(true) : router.push("/sign-in?redirect_to=/discussions")}
+                    >
+                        Open a Discussion
+                    </Button>
                 </DialogTrigger>
             )}
             <DialogContent className="lg:min-w-[700px] md:min-w-[700px] sm:max-w-[425px] max-h-[90vh]">
@@ -214,13 +253,7 @@ export default function DiscussionFormDialog({
                 </DialogHeader>
                 <Form {...form}>
                     <form
-                        onSubmit={form.handleSubmit(handleSubmit, (errors) => {
-                            const first = Object.values(errors)[0];
-                            const description = first && "message" in first && first.message
-                                ? String(first.message)
-                                : "Please fix the highlighted fields.";
-                            toast({ description, variant: "destructive" });
-                        })}
+                        onSubmit={runSubmit}
                         className="space-y-4 p-4 max-h-[80vh] overflow-y-auto "
                     >
                         <FormField
@@ -298,13 +331,18 @@ export default function DiscussionFormDialog({
                             <Button type="button" disabled={submitting} onClick={resetForm} variant="outline" className="mr-2">
                                 reset
                             </Button>
-                            <Button type="submit" disabled={submitting}>
+                            {/* type=button + explicit handler: native submit can be eaten by Radix layers */}
+                            <Button
+                                type="button"
+                                disabled={submitting}
+                                onClick={() => void runSubmit()}
+                            >
                                 {submitting ? "submitting..." : data ? "Save changes" : "Post"}
                             </Button>
                         </DialogFooter>
                     </form>
                 </Form>
             </DialogContent>
-        </Dialog >
+        </Dialog>
     );
 }

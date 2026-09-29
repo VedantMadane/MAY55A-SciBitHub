@@ -13,7 +13,10 @@ import { DiscussionStatus } from "@/src/types/enums";
 import { useToast } from "@/src/hooks/use-toast";
 
 export function DiscussionDropdownMenu({ discussion, showVisit = true }: { discussion: Discussion, showVisit?: boolean }) {
-    const [editOpen, setEditOpen] = useState(false);
+    // Mount edit dialog outside the menu (UserFormDialog pattern). Nesting Dialog
+    // inside DropdownMenuItem + preventDefault leaves Radix body pointer-events:none
+    // active so Save never reaches the form handler.
+    const [showEditDialog, setShowEditDialog] = useState(false);
     const router = useRouter();
     const { toast } = useToast();
 
@@ -44,15 +47,24 @@ export function DiscussionDropdownMenu({ discussion, showVisit = true }: { discu
         }
     }
 
+    const openEditDialog = () => {
+        // Let the menu finish closing and clear its dismissable layer before the
+        // dialog mounts; otherwise Dialog inherits body { pointer-events: none }.
+        window.setTimeout(() => {
+            document.body.style.removeProperty("pointer-events");
+            setShowEditDialog(true);
+        }, 0);
+    };
+
     return (
-        <>
-            <DropdownMenu>
+        <div>
+            {/* modal={false}: dropdown must not lock body pointer-events while we open a dialog */}
+            <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
                     <Button variant="ghost" className="h-6 w-6 p-0"><Ellipsis size={15} /></Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
                     className="w-36"
-                    // Keep focus from jumping back to the trigger so the edit dialog can receive it
                     onCloseAutoFocus={(event) => event.preventDefault()}
                 >
                     <DropdownMenuGroup>
@@ -65,15 +77,10 @@ export function DiscussionDropdownMenu({ discussion, showVisit = true }: { discu
                                 Visit
                             </DropdownMenuItem>
                         }
-                        {/* Open edit dialog outside the menu — nesting traps focus/pointer events */}
                         <DropdownMenuItem
                             title="Edit"
                             className="px-4"
-                            onSelect={() => {
-                                // Defer until the dropdown fully closes and Radix clears
-                                // body { pointer-events: none }, otherwise the dialog is inert.
-                                setTimeout(() => setEditOpen(true), 0);
-                            }}
+                            onSelect={openEditDialog}
                         >
                             Edit
                         </DropdownMenuItem>
@@ -113,21 +120,20 @@ export function DiscussionDropdownMenu({ discussion, showVisit = true }: { discu
                     </DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>
-            {editOpen && (
+            {showEditDialog && (
                 <DiscussionFormDialog
-                    open={editOpen}
-                    onOpenChange={setEditOpen}
                     data={{
                         id: discussion.id,
                         title: discussion.title,
                         body: discussion.body,
                         category: discussion.category,
-                        tags: discussion.tags,
-                        files: discussion.files ?? undefined,
-                        creator: discussion.creator?.id,
+                        tags: discussion.tags ?? null,
+                        files: discussion.files ?? null,
+                        creator: discussion.creator?.id ?? null,
                     }}
+                    onClose={() => setShowEditDialog(false)}
                 />
             )}
-        </>
+        </div>
     )
 }

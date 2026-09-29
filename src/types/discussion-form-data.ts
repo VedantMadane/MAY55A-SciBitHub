@@ -9,7 +9,7 @@ export const discussionInputDataSchema = z.object({
         errorMap: () => ({ message: "Please select a category" }),
     }),
     tags: z.array(z.string()).nullable().optional(),
-    // DB may return null for discussions with no attachments / missing creator join
+    // DB may return null for discussions with no attachments; form maps null -> [].
     files: z.array(z.string()).nullable().optional(),
     creator: z.string().nullable().optional(),
 });
