@@ -27,18 +27,13 @@ interface DiscussionFormDialogProps {
     onClose?: () => void;
 }
 
-function clearBodyLockStyles() {
-    document.body.style.removeProperty("pointer-events");
-    document.body.style.overflow = "";
-}
-
 export default function DiscussionFormDialog({
     data,
     onClose,
 }: DiscussionFormDialogProps) {
     const { user, loading } = useAuth();
-    // Edit path mounts this component when opening (same as UserFormDialog): start open.
-    // Create path keeps an internal closed state and uses DialogTrigger.
+    // Edit path (data set): start open, same as UserFormDialog.
+    // Create path: start closed and use DialogTrigger.
     const [open, setOpen] = useState(!!data);
     const [submitting, setSubmitting] = useState(false);
     const [message, setMessage] = useState<Message | undefined>(undefined);
@@ -51,7 +46,7 @@ export default function DiscussionFormDialog({
             body: data?.body || "",
             category: data?.category || "",
             tags: data?.tags ?? [],
-            // Always a real array in the form — Zod rejects null; DB null is mapped here.
+            // DB may return null for discussions with no attachments; form keeps [].
             files: data?.files ?? [],
             creator: data?.creator ?? "",
             id: data?.id,
@@ -83,7 +78,7 @@ export default function DiscussionFormDialog({
         })
 
         if (res.success) {
-            clearBodyLockStyles();
+            document.body.style.overflow = "";
             startTransition(() => {
                 setOpen(false);
                 onClose?.();
@@ -103,13 +98,13 @@ export default function DiscussionFormDialog({
             return;
         }
         setSubmitting(true);
-        // Keep id/creator from the original discussion; form values override the rest.
+        // Keep id/creator/original file paths from the discussion record.
         const res = await updateDiscussion(
             {
                 ...formData,
                 id: data?.id ?? formData.id,
-                creator: data?.creator ?? formData.creator,
-                files: data?.files ?? formData.files,
+                creator: data?.creator || formData.creator || user?.id || "",
+                files: data?.files ?? formData.files ?? [],
             },
             newFiles,
             existingFiles.map(f => f.path),
@@ -123,7 +118,7 @@ export default function DiscussionFormDialog({
 
         if (res.success) {
             startTransition(() => {
-                clearBodyLockStyles();
+                document.body.style.overflow = "";
                 router.refresh();
                 setOpen(false);
                 onClose?.();
@@ -148,9 +143,6 @@ export default function DiscussionFormDialog({
         toast({ description, variant: "destructive" });
     };
 
-    // Programmatic submit avoids native submit being swallowed by leftover Radix layers.
-    const runSubmit = form.handleSubmit(handleSubmit, onInvalid);
-
     const resetForm = async () => {
         form.reset({
             title: data?.title || "",
@@ -166,19 +158,6 @@ export default function DiscussionFormDialog({
         setNewFiles([]);
         setExistingFiles(initialFiles);
     }
-
-    // Restore body lock styles when the dialog closes (Radix dropdown/dialog race).
-    useEffect(() => {
-        if (!open) {
-            clearBodyLockStyles();
-            return;
-        }
-        // Dialog may have captured pointer-events:none from a still-closing menu.
-        const t = window.setTimeout(() => {
-            document.body.style.removeProperty("pointer-events");
-        }, 0);
-        return () => window.clearTimeout(t);
-    }, [open]);
 
     useEffect(() => {
         if (!open || !data) return;
@@ -220,20 +199,22 @@ export default function DiscussionFormDialog({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, data?.id]);
 
-    if (loading) {
+    // Create path still waits for auth; edit path always shows (auth checked on submit).
+    if (!data && loading) {
         return null;
     }
 
-    const handleOpenChange = (next: boolean) => {
-        setOpen(next);
-        if (!next) {
-            clearBodyLockStyles();
-            onClose?.();
-        }
-    };
-
     return (
-        <Dialog open={!!user && open} onOpenChange={handleOpenChange}>
+        <Dialog
+            open={data ? open : (!!user && open)}
+            onOpenChange={(next) => {
+                setOpen(next);
+                if (!next) {
+                    document.body.style.overflow = "";
+                    onClose?.();
+                }
+            }}
+        >
             {!data && (
                 <DialogTrigger asChild>
                     <Button
@@ -253,7 +234,7 @@ export default function DiscussionFormDialog({
                 </DialogHeader>
                 <Form {...form}>
                     <form
-                        onSubmit={runSubmit}
+                        onSubmit={form.handleSubmit(handleSubmit, onInvalid)}
                         className="space-y-4 p-4 max-h-[80vh] overflow-y-auto "
                     >
                         <FormField
@@ -331,12 +312,7 @@ export default function DiscussionFormDialog({
                             <Button type="button" disabled={submitting} onClick={resetForm} variant="outline" className="mr-2">
                                 reset
                             </Button>
-                            {/* type=button + explicit handler: native submit can be eaten by Radix layers */}
-                            <Button
-                                type="button"
-                                disabled={submitting}
-                                onClick={() => void runSubmit()}
-                            >
+                            <Button type="submit" disabled={submitting}>
                                 {submitting ? "submitting..." : data ? "Save changes" : "Post"}
                             </Button>
                         </DialogFooter>

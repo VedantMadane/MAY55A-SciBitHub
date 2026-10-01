@@ -13,9 +13,8 @@ import { DiscussionStatus } from "@/src/types/enums";
 import { useToast } from "@/src/hooks/use-toast";
 
 export function DiscussionDropdownMenu({ discussion, showVisit = true }: { discussion: Discussion, showVisit?: boolean }) {
-    // Mount edit dialog outside the menu (UserFormDialog pattern). Nesting Dialog
-    // inside DropdownMenuItem + preventDefault leaves Radix body pointer-events:none
-    // active so Save never reaches the form handler.
+    // Match admin UserFormDialog: open edit from menu onClick, mount dialog OUTSIDE the
+    // DropdownMenu so Radix menu focus/pointer-events never trap the form Save button.
     const [showEditDialog, setShowEditDialog] = useState(false);
     const router = useRouter();
     const { toast } = useToast();
@@ -27,12 +26,10 @@ export function DiscussionDropdownMenu({ discussion, showVisit = true }: { discu
             variant: res.success ? "default" : "destructive",
         });
 
-        // Refresh the page if the user is on the discussion page
         if (!showVisit) {
             router.refresh();
         }
     }
-
 
     const handleDelete = async () => {
         const res = await deleteDiscussion(discussion.id!);
@@ -41,32 +38,23 @@ export function DiscussionDropdownMenu({ discussion, showVisit = true }: { discu
             variant: res.success ? "default" : "destructive",
         });
 
-        // Redirect to user profile discussions page if deletion is successful
         if (res.success) {
             router.push("/profile/discussions");
         }
     }
 
-    const openEditDialog = () => {
-        // Let the menu finish closing and clear its dismissable layer before the
-        // dialog mounts; otherwise Dialog inherits body { pointer-events: none }.
-        window.setTimeout(() => {
-            document.body.style.removeProperty("pointer-events");
-            setShowEditDialog(true);
-        }, 0);
-    };
+    const creatorId =
+        typeof (discussion.creator as unknown) === "string"
+            ? (discussion.creator as unknown as string)
+            : discussion.creator?.id ?? null;
 
     return (
         <div>
-            {/* modal={false}: dropdown must not lock body pointer-events while we open a dialog */}
-            <DropdownMenu modal={false}>
+            <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                     <Button variant="ghost" className="h-6 w-6 p-0"><Ellipsis size={15} /></Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent
-                    className="w-36"
-                    onCloseAutoFocus={(event) => event.preventDefault()}
-                >
+                <DropdownMenuContent className="w-36">
                     <DropdownMenuGroup>
                         {showVisit &&
                             <DropdownMenuItem
@@ -80,7 +68,7 @@ export function DiscussionDropdownMenu({ discussion, showVisit = true }: { discu
                         <DropdownMenuItem
                             title="Edit"
                             className="px-4"
-                            onSelect={openEditDialog}
+                            onClick={() => setShowEditDialog(true)}
                         >
                             Edit
                         </DropdownMenuItem>
@@ -104,7 +92,7 @@ export function DiscussionDropdownMenu({ discussion, showVisit = true }: { discu
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                         onSelect={(event) => {
-                            event.preventDefault(); // Prevent dialog from closing
+                            event.preventDefault();
                         }}
                         className="hover:text-destructive">
                         <CustomAlertDialog
@@ -129,7 +117,7 @@ export function DiscussionDropdownMenu({ discussion, showVisit = true }: { discu
                         category: discussion.category,
                         tags: discussion.tags ?? null,
                         files: discussion.files ?? null,
-                        creator: discussion.creator?.id ?? null,
+                        creator: creatorId,
                     }}
                     onClose={() => setShowEditDialog(false)}
                 />
